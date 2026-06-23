@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Song Studio</title>
+<style>
+  /* ============================================================
+     DESIGN TOKENS
+     Palette: deep space dark, neon teal, hot pink, electric blue, purple
+  ============================================================ */
+  :root {
+    --bg-deep:    #07080f;
+    --bg-panel:   #0d0f1a;
+    --bg-cell:    #12152a;
+    --border:     #1e2240;
+    --teal:       #00f5d4;
+    --pink:       #ff2d78;
+    --blue:       #0af;
+    --purple:     #a855f7;
+    --yellow:     #ffe44d;
+    --text:       #c8d0f0;
+    --text-dim:   #4a5080;
+    --glow-teal:  0 0 12px #00f5d4aa, 0 0 28px #00f5d455;
+    --glow-pink:  0 0 12px #ff2d78aa, 0 0 28px #ff2d7855;
+    --glow-blue:  0 0 12px #00aaffaa, 0 0 28px #00aaff55;
+    --glow-purp:  0 0 12px #a855f7aa, 0 0 28px #a855f755;
+    --cell-size: clamp(28px, 5vw, 52px);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg-deep);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    user-select: none;
+  }
+
+  /* Background canvas - full screen, behind everything */
+  #bgCanvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* ============================================================ HEADER */
+  header {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 1000px;
+    padding: 18px 24px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .logo-title {
+    font-size: clamp(20px, 4vw, 32px);
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(90deg, var(--teal) 0%, var(--blue) 50%, var(--purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 14px #00f5d466);
+  }
+
+  .logo-tag {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .header-status {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background .3s, box-shadow .3s;
+  }
+  .status-dot.playing {
+    background: var(--teal);
+    box-shadow: var(--glow-teal);
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  /* ============================================================ SEQUENCER AREA */
+  #sequencer-wrap {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 1000px;
+    padding: 8px 16px;
+  }
+
+  #grid-container {
+    position: relative;
+    width: 100%;
+  }
+
+  /* Playhead line overlay */
+  #playhead {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 3px;
+    background: var(--teal);
+    box-shadow: var(--glow-teal);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 20;
+    transition: left 0.05s linear;
+    opacity: 0;
+  }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    grid-template-rows: repeat(11, var(--cell-size));
+    gap: 3px;
+    width: 100%;
+  }
+
+  .cell {
+    border-radius: 4px;
+    background: var(--bg-cell);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: background .1s, transform .1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cell:hover { background: #1a1e3a; transform: scale(1.04); }
+
+  /* Each instrument gets its own glow color */
+  .cell.on-0 { background: #002b28; border-color: var(--teal);   box-shadow: inset 0 0 8px #00f5d455; }
+  .cell.on-1 { background: #2a0020; border-color: var(--pink);   box-shadow: inset 0 0 8px #ff2d7855; }
+  .cell.on-2 { background: #001b2a; border-color: var(--blue);   box-shadow: inset 0 0 8px #00aaff55; }
+  .cell.on-3 { background: #1a0a30; border-color: var(--purple); box-shadow: inset 0 0 8px #a855f755; }
+
+  /* Instrument shape inside active cell */
+  .cell .shape {
+    display: none;
+    width: 55%; height: 55%;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .cell.on-0 .shape { display: block; background: var(--teal);   box-shadow: 0 0 6px var(--teal);   border-radius: 50%; }
+  .cell.on-1 .shape { display: block; background: var(--pink);   box-shadow: 0 0 6px var(--pink);   border-radius: 3px; transform: rotate(45deg); }
+  .cell.on-2 .shape { display: block; background: var(--blue);   box-shadow: 0 0 6px var(--blue);   clip-path: polygon(50% 0%,100% 100%,0% 100%); border-radius: 0; }
+  .cell.on-3 .shape { display: block; background: var(--purple); box-shadow: 0 0 6px var(--purple); clip-path: polygon(50% 0%,100% 50%,50% 100%,0% 50%); border-radius: 0; }
+
+  /* Beat column highlight */
+  .cell.beat-col { background: #181b34; }
+
+  /* ============================================================ CONTROL DOCK */
+  #dock {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 1000px;
+    margin: 12px 0 0;
+    padding: 0 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .dock-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* Play / Stop */
+  .btn-play {
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    background: transparent;
+    color: var(--teal);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .2s;
+    box-shadow: var(--glow-teal);
+    flex-shrink: 0;
+  }
+  .btn-play:hover { background: var(--teal); color: #000; }
+  .btn-play.active { background: var(--teal); color: #000; }
+
+  /* Clear */
+  .btn-clear {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--pink);
+    background: transparent;
+    color: var(--pink);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .btn-clear:hover { background: var(--pink); color: #000; }
+
+  /* Instrument buttons */
+  .instr-group {
+    display: flex;
+    gap: 6px;
+  }
+
+  .btn-instr {
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: 1px solid;
+    background: transparent;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .2s;
+    font-weight: 600;
+  }
+  .btn-instr[data-i="0"] { border-color: var(--teal);   color: var(--teal); }
+  .btn-instr[data-i="1"] { border-color: var(--pink);   color: var(--pink); }
+  .btn-instr[data-i="2"] { border-color: var(--blue);   color: var(--blue); }
+  .btn-instr[data-i="3"] { border-color: var(--purple); color: var(--purple); }
+  .btn-instr.active[data-i="0"] { background: var(--teal);   color: #000; box-shadow: var(--glow-teal); }
+  .btn-instr.active[data-i="1"] { background: var(--pink);   color: #000; box-shadow: var(--glow-pink); }
+  .btn-instr.active[data-i="2"] { background: var(--blue);   color: #000; box-shadow: var(--glow-blue); }
+  .btn-instr.active[data-i="3"] { background: var(--purple); color: #000; box-shadow: var(--glow-purp); }
+
+  /* Sliders + labels */
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 140px;
+  }
+  .ctrl-label {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    white-space: nowrap;
+    width: 36px;
+  }
+  .ctrl-val {
+    font-size: 11px;
+    color: var(--text);
+    width: 30px;
+    text-align: right;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 6px var(--teal);
+    cursor: pointer;
+    transition: transform .1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+  input[type=range].pink::-webkit-slider-thumb  { background: var(--pink);   box-shadow: 0 0 6px var(--pink); }
+  input[type=range].blue::-webkit-slider-thumb  { background: var(--blue);   box-shadow: 0 0 6px var(--blue); }
+  input[type=range].purp::-webkit-slider-thumb  { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+
+  /* FX panel toggle */
+  .btn-fx {
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--blue);
+    background: transparent;
+    color: var(--blue);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .btn-fx.open { background: var(--blue); color: #000; }
+
+  #fx-panel {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height .3s ease;
+    background: var(--bg-panel);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  #fx-panel.open { max-height: 180px; }
+
+  .fx-inner {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Key selector */
+  .key-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .key-group .ctrl-label { width: auto; }
+  .btn-key {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn-key.active { border-color: var(--purple); color: var(--purple); background: #1a0a30; }
+
+  /* Separator */
+  .dock-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 2px 0;
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    :root { --cell-size: 26px; }
+    #grid { gap: 2px; }
+    .btn-instr { padding: 6px 8px; font-size: 10px; }
+    .logo-title { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Full-screen background canvas for Fischinger-style explosions -->
+<canvas id="bgCanvas"></canvas>
+
+<!-- ========== HEADER ========== -->
+<header>
+  <div class="logo">
+    <span class="logo-title">Song Studio</span>
+    <span class="logo-tag">Sequencer</span>
+  </div>
+  <div class="header-status">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusLabel">STOPPED</span>
+  </div>
+</header>
+
+<!-- ========== SEQUENCER ========== -->
+<div id="sequencer-wrap">
+  <div id="grid-container">
+    <div id="playhead"></div>
+    <div id="grid"></div>
+  </div>
+</div>
+
+<!-- ========== CONTROL DOCK ========== -->
+<div id="dock">
+
+  <!-- Row 1: Play, Clear, Instruments -->
+  <div class="dock-row">
+    <button class="btn-play" id="btnPlay" title="Play / Pause">▶</button>
+    <button class="btn-clear" id="btnClear">Clear</button>
+    <div class="instr-group">
+      <button class="btn-instr active" data-i="0">Chime</button>
+      <button class="btn-instr"        data-i="1">Pad</button>
+      <button class="btn-instr"        data-i="2">Synth</button>
+      <button class="btn-instr"        data-i="3">Bass</button>
+    </div>
+    <button class="btn-fx" id="btnFx">FX ▾</button>
+  </div>
+
+  <!-- Row 2: BPM -->
+  <div class="dock-row">
+    <div class="ctrl-group">
+      <span class="ctrl-label">BPM</span>
+      <input type="range" id="bpmSlider" min="40" max="200" value="100" step="1">
+      <span class="ctrl-val" id="bpmVal">100</span>
+    </div>
+  </div>
+
+  <!-- FX Panel (collapsed by default) -->
+  <div id="fx-panel">
+    <div class="fx-inner">
+      <!-- Key selector -->
+      <div class="key-group">
+        <span class="ctrl-label">Key</span>
+        <button class="btn-key active" data-root="0">C</button>
+        <button class="btn-key" data-root="2">D</button>
+        <button class="btn-key" data-root="4">E</button>
+        <button class="btn-key" data-root="5">F</button>
+        <button class="btn-key" data-root="7">G</button>
+        <button class="btn-key" data-root="9">A</button>
+        <button class="btn-key" data-root="11">B</button>
+      </div>
+      <!-- Delay -->
+      <div class="dock-row">
+        <div class="ctrl-group">
+          <span class="ctrl-label">Delay</span>
+          <input type="range" class="pink" id="delaySlider" min="0" max="1" value="0" step="0.01">
+          <span class="ctrl-val" id="delayVal">0%</span>
+        </div>
+        <!-- Filter -->
+        <div class="ctrl-group">
+          <span class="ctrl-label">Filter</span>
+          <input type="range" class="purp" id="filterSlider" min="200" max="8000" value="8000" step="50">
+          <span class="ctrl-val" id="filterVal">8k</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ================================================================
+   SONG STUDIO — Main Script
+   Architecture:
+     - AudioContext with master chain: instruments → filter → delay → gain → out
+     - 4 independent instrument layers (each a 16×11 boolean grid)
+     - requestAnimationFrame sequencer loop (tempo-accurate via AudioContext time)
+     - Canvas particle system for Fischinger-style geometric explosions
+   ================================================================ */
+
+// ─────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────
+const COLS = 16;
+const ROWS = 11;
+const NUM_INSTRUMENTS = 4;
+
+// Pentatonic intervals (semitones above root): 0,2,4,7,9  × 2 octaves + 1 extra = 11 notes
+// Rows from bottom (index 10=lowest) to top (index 0=highest)
+const PENTA_INTERVALS = [0, 2, 4, 7, 9]; // pentatonic scale steps
+
+// Build 11-note pentatonic pitch array relative to a root (MIDI note)
+function buildScale(rootMidi) {
+  const notes = [];
+  for (let oct = 2; oct >= 0; oct--) {
+    for (let i = 0; i < PENTA_INTERVALS.length; i++) {
+      const midi = rootMidi + oct * 12 + PENTA_INTERVALS[i];
+      notes.push(440 * Math.pow(2, (midi - 69) / 12)); // MIDI → Hz
+    }
+  }
+  // We need exactly 11 notes, top = highest pitch
+  return notes.slice(0, ROWS);
+}
+
+let rootMidi = 60; // C4
+let scale = buildScale(rootMidi);
+
+// Instrument colors (for canvas explosions)
+const INSTR_COLORS = ['#00f5d4', '#ff2d78', '#00aaff', '#a855f7'];
+
+// ─────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────
+// 4 layers × 11 rows × 16 columns
+const grids = Array.from({length: NUM_INSTRUMENTS}, () =>
+  Array.from({length: ROWS}, () => new Array(COLS).fill(false))
+);
+let currentInstr = 0; // active instrument layer
+let isPlaying = false;
+let currentBeat = -1;
+let bpm = 100;
+
+// ─────────────────────────────────────────
+// AUDIO CONTEXT + ROUTING
+// ─────────────────────────────────────────
+let ctx = null;
+let masterGain, filterNode, delayNode, delayFeedback, delayWet;
+
+function initAudio() {
+  if (ctx) return;
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Master gain (output)
+  masterGain = ctx.createGain();
+  masterGain.gain.value = 0.85;
+  masterGain.connect(ctx.destination);
+
+  // Low-pass filter (phaser/filter FX)
+  filterNode = ctx.createBiquadFilter();
+  filterNode.type = 'lowpass';
+  filterNode.frequency.value = 8000;
+  filterNode.Q.value = 1.5;
+  filterNode.connect(masterGain);
+
+  // Delay node (echo FX)
+  // Routing: dry signal → filterNode; wet signal → delay loop → filterNode
+  delayNode = ctx.createDelay(1.0);
+  delayNode.delayTime.value = 0.35;
+
+  delayFeedback = ctx.createGain();
+  delayFeedback.gain.value = 0.35; // internal feedback
+
+  delayWet = ctx.createGain();
+  delayWet.gain.value = 0; // starts dry
+
+  delayNode.connect(delayFeedback);
+  delayFeedback.connect(delayNode);
+  delayNode.connect(delayWet);
+  delayWet.connect(masterGain);
+}
+
+// ─────────────────────────────────────────
+// SYNTH ENGINES (4 instruments)
+// ─────────────────────────────────────────
+function playNote(instrIdx, rowIdx, time) {
+  if (!ctx) return;
+  const freq = scale[rowIdx];
+
+  switch (instrIdx) {
+    case 0: playChime(freq, time); break;
+    case 1: playPad(freq, time);   break;
+    case 2: playSynth(freq, time); break;
+    case 3: playBass(freq, time);  break;
+  }
+}
+
+/* Instr 0 — Bright chime pluck: Sine + Triangle, fast decay */
+function playChime(freq, t) {
+  const osc1 = ctx.createOscillator();
+  const osc2 = ctx.createOscillator();
+  const env  = ctx.createGain();
+
+  osc1.type = 'sine';   osc1.frequency.value = freq;
+  osc2.type = 'triangle'; osc2.frequency.value = freq * 2.003; // slight detuning for shimmer
+
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.45, t + 0.005);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+
+  osc1.connect(env); osc2.connect(env);
+  env.connect(filterNode);
+
+  osc1.start(t); osc2.start(t);
+  osc1.stop(t + 1.3); osc2.stop(t + 1.3);
+}
+
+/* Instr 1 — Ambient pad: soft triangle, slow attack/release */
+function playPad(freq, t) {
+  const osc = ctx.createOscillator();
+  const env = ctx.createGain();
+
+  osc.type = 'triangle';
+  osc.frequency.value = freq;
+
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.3, t + 0.08);
+  env.gain.setValueAtTime(0.3, t + 0.5);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 2.0);
+
+  osc.connect(env);
+  env.connect(filterNode);
+  osc.start(t); osc.stop(t + 2.1);
+}
+
+/* Instr 2 — Synth bite: sawtooth through bandpass */
+function playSynth(freq, t) {
+  const osc  = ctx.createOscillator();
+  const filt = ctx.createBiquadFilter();
+  const env  = ctx.createGain();
+
+  osc.type = 'sawtooth';
+  osc.frequency.value = freq;
+
+  filt.type = 'bandpass';
+  filt.frequency.value = freq * 1.5;
+  filt.Q.value = 4;
+
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.4, t + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+
+  osc.connect(filt); filt.connect(env); env.connect(filterNode);
+  osc.start(t); osc.stop(t + 0.7);
+}
+
+/* Instr 3 — Deep bass chime: low square filtered */
+function playBass(freq, t) {
+  const osc  = ctx.createOscillator();
+  const filt = ctx.createBiquadFilter();
+  const env  = ctx.createGain();
+
+  osc.type = 'square';
+  osc.frequency.value = freq * 0.5; // sub-octave
+  
+  filt.type = 'lowpass';
+  filt.frequency.value = 600;
+  filt.Q.value = 2;
+
+  env.gain.setValueAtTime(0, t);
+  env.gain.linearRampToValueAtTime(0.5, t + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+
+  osc.connect(filt); filt.connect(env); env.connect(filterNode);
+  // Also feed into delay for deep echo
+  env.connect(delayNode);
+  osc.start(t); osc.stop(t + 1.1);
+}
+
+// ─────────────────────────────────────────
+// CANVAS PARTICLE SYSTEM
+// ─────────────────────────────────────────
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+let particles = [];
+
+function resizeCanvas() {
+  bgCanvas.width  = window.innerWidth;
+  bgCanvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+/* Spawn a Fischinger geometric explosion at screen (x, y) */
+function spawnExplosion(x, y, color) {
+  const count = 6 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+    const speed = 1.5 + Math.random() * 3.5;
+    const type = Math.floor(Math.random() * 4); // 0=circle, 1=square, 2=diamond, 3=ring
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 4 + Math.random() * 12,
+      maxSize: 14 + Math.random() * 30,
+      alpha: 1,
+      color,
+      type,
+      grow: 0.7 + Math.random() * 1.2,
+      life: 1
+    });
+  }
+
+  // Additional concentric ring burst
+  particles.push({
+    x, y, vx: 0, vy: 0,
+    size: 8, maxSize: 90 + Math.random() * 60,
+    alpha: 0.7, color, type: 3, grow: 4, life: 1
+  });
+}
+
+function drawParticle(p) {
+  bgCtx.save();
+  bgCtx.globalAlpha = p.alpha * p.life;
+  bgCtx.shadowColor = p.color;
+  bgCtx.shadowBlur = 10;
+  bgCtx.fillStyle = p.color;
+  bgCtx.strokeStyle = p.color;
+  bgCtx.lineWidth = 1.5;
+
+  switch (p.type) {
+    case 0: // filled circle
+      bgCtx.beginPath();
+      bgCtx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+      bgCtx.fill();
+      break;
+    case 1: // square
+      bgCtx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+      break;
+    case 2: // diamond (rotated square)
+      bgCtx.translate(p.x, p.y);
+      bgCtx.rotate(Math.PI / 4);
+      bgCtx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+      break;
+    case 3: // ring (expanding stroke circle)
+      bgCtx.beginPath();
+      bgCtx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+      bgCtx.lineWidth = 2;
+      bgCtx.stroke();
+      break;
+  }
+  bgCtx.restore();
+}
+
+function animateParticles() {
+  // Fade trail (semi-transparent clear creates ghosting)
+  bgCtx.fillStyle = 'rgba(7,8,15,0.18)';
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+    p.size = Math.min(p.size + p.grow, p.maxSize);
+    p.life -= 0.025;
+    p.alpha = p.life;
+
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    drawParticle(p);
+  }
+
+  requestAnimationFrame(animateParticles);
+}
+animateParticles();
+
+// ─────────────────────────────────────────
+// BUILD THE HTML GRID
+// ─────────────────────────────────────────
+const gridEl = document.getElementById('grid');
+
+function buildGrid() {
+  gridEl.innerHTML = '';
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      const shape = document.createElement('div');
+      shape.className = 'shape';
+      cell.appendChild(shape);
+      gridEl.appendChild(cell);
+    }
+  }
+}
+buildGrid();
+
+function getCell(r, c) {
+  return gridEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+}
+
+function updateCellVisual(r, c) {
+  const cell = getCell(r, c);
+  if (!cell) return;
+  // Remove all on- classes
+  cell.className = 'cell';
+  // Check which instruments are ON at this cell
+  for (let i = 0; i < NUM_INSTRUMENTS; i++) {
+    if (grids[i][r][c]) {
+      cell.classList.add(`on-${i}`);
+      break; // visual shows only topmost active layer for cleanliness
+    }
+  }
+}
+
+// Grid click (toggle)
+let isDragging = false;
+let dragState = null; // true=activating, false=deactivating
+
+gridEl.addEventListener('mousedown', e => {
+  const cell = e.target.closest('.cell');
+  if (!cell) return;
+  initAudio();
+  const r = +cell.dataset.r, c = +cell.dataset.c;
+  isDragging = true;
+  dragState = !grids[currentInstr][r][c]; // toggle to opposite
+  grids[currentInstr][r][c] = dragState;
+  updateCellVisual(r, c);
+  e.preventDefault();
+});
+
+gridEl.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const cell = e.target.closest('.cell');
+  if (!cell) return;
+  const r = +cell.dataset.r, c = +cell.dataset.c;
+  grids[currentInstr][r][c] = dragState;
+  updateCellVisual(r, c);
+});
+
+document.addEventListener('mouseup', () => { isDragging = false; });
+
+// Touch support
+gridEl.addEventListener('touchstart', e => {
+  initAudio();
+  const t = e.touches[0];
+  const el = document.elementFromPoint(t.clientX, t.clientY)?.closest('.cell');
+  if (!el) return;
+  const r = +el.dataset.r, c = +el.dataset.c;
+  isDragging = true;
+  dragState = !grids[currentInstr][r][c];
+  grids[currentInstr][r][c] = dragState;
+  updateCellVisual(r, c);
+  e.preventDefault();
+}, {passive: false});
+
+gridEl.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  const t = e.touches[0];
+  const el = document.elementFromPoint(t.clientX, t.clientY)?.closest('.cell');
+  if (!el) return;
+  const r = +el.dataset.r, c = +el.dataset.c;
+  grids[currentInstr][r][c] = dragState;
+  updateCellVisual(r, c);
+  e.preventDefault();
+}, {passive: false});
+
+document.addEventListener('touchend', () => { isDragging = false; });
+
+// ─────────────────────────────────────────
+// PLAYHEAD + SEQUENCER LOOP
+// ─────────────────────────────────────────
+const playheadEl = document.getElementById('playhead');
+
+let scheduleAheadTime = 0.1; // seconds to look ahead
+let nextBeatTime = 0;
+let schedulerTimer = null;
+
+function secondsPerBeat() {
+  return 60.0 / bpm;
+}
+
+function scheduler() {
+  if (!isPlaying) return;
+  while (nextBeatTime < ctx.currentTime + scheduleAheadTime) {
+    schedulebeat(currentBeat, nextBeatTime);
+    currentBeat = (currentBeat + 1) % COLS;
+    nextBeatTime += secondsPerBeat() / 2; // 16th notes (half a beat per column in 4/4)
+  }
+  schedulerTimer = setTimeout(scheduler, 25);
+}
+
+function schedulebeat(beat, time) {
+  // Trigger notes for all 4 instruments at this column
+  for (let i = 0; i < NUM_INSTRUMENTS; i++) {
+    for (let r = 0; r < ROWS; r++) {
+      if (grids[i][r][beat]) {
+        playNote(i, r, time);
+      }
+    }
+  }
+
+  // Schedule visual update at the right real-time moment
+  const delay = (time - ctx.currentTime) * 1000;
+  setTimeout(() => {
+    if (!isPlaying) return;
+    advanceVisualPlayhead(beat);
+  }, Math.max(0, delay));
+}
+
+// Visual column highlight + particle burst
+function advanceVisualPlayhead(beat) {
+  // Clear prev beat column highlight
+  document.querySelectorAll('.cell.beat-col').forEach(c => {
+    c.classList.remove('beat-col');
+    // re-apply on-X class properly
+    const r = +c.dataset.r, col = +c.dataset.c;
+    updateCellVisual(r, col);
+  });
+
+  // Highlight this column
+  for (let r = 0; r < ROWS; r++) {
+    const cell = getCell(r, beat);
+    if (cell) cell.classList.add('beat-col');
+  }
+
+  // Move playhead line
+  const colWidth = gridEl.offsetWidth / COLS;
+  playheadEl.style.left = (beat * colWidth + colWidth / 2 - 1.5) + 'px';
+  playheadEl.style.opacity = '1';
+
+  // Spawn explosions for triggered cells
+  for (let i = 0; i < NUM_INSTRUMENTS; i++) {
+    for (let r = 0; r < ROWS; r++) {
+      if (grids[i][r][beat]) {
+        const cell = getCell(r, beat);
+        if (cell) {
+          const rect = cell.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          spawnExplosion(cx, cy, INSTR_COLORS[i]);
+        }
+      }
+    }
+  }
+}
+
+function startPlay() {
+  if (!ctx) initAudio();
+  if (ctx.state === 'suspended') ctx.resume();
+  isPlaying = true;
+  currentBeat = 0;
+  nextBeatTime = ctx.currentTime + 0.05;
+  scheduler();
+  document.getElementById('btnPlay').textContent = '⏹';
+  document.getElementById('btnPlay').classList.add('active');
+  document.getElementById('statusDot').classList.add('playing');
+  document.getElementById('statusLabel').textContent = 'PLAYING';
+  playheadEl.style.opacity = '1';
+}
+
+function stopPlay() {
+  isPlaying = false;
+  clearTimeout(schedulerTimer);
+  currentBeat = -1;
+  document.getElementById('btnPlay').textContent = '▶';
+  document.getElementById('btnPlay').classList.remove('active');
+  document.getElementById('statusDot').classList.remove('playing');
+  document.getElementById('statusLabel').textContent = 'STOPPED';
+  playheadEl.style.opacity = '0';
+
+  // Clear column highlights
+  document.querySelectorAll('.cell.beat-col').forEach(c => {
+    c.classList.remove('beat-col');
+    updateCellVisual(+c.dataset.r, +c.dataset.c);
+  });
+}
+
+document.getElementById('btnPlay').addEventListener('click', () => {
+  initAudio();
+  isPlaying ? stopPlay() : startPlay();
+});
+
+// ─────────────────────────────────────────
+// BPM CONTROL
+// ─────────────────────────────────────────
+const bpmSlider = document.getElementById('bpmSlider');
+const bpmVal    = document.getElementById('bpmVal');
+bpmSlider.addEventListener('input', () => {
+  bpm = +bpmSlider.value;
+  bpmVal.textContent = bpm;
+});
+
+// ─────────────────────────────────────────
+// INSTRUMENT SELECTOR
+// ─────────────────────────────────────────
+document.querySelectorAll('.btn-instr').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.btn-instr').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentInstr = +btn.dataset.i;
+  });
+});
+
+// ─────────────────────────────────────────
+// CLEAR BUTTON
+// ─────────────────────────────────────────
+document.getElementById('btnClear').addEventListener('click', () => {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      grids[currentInstr][r][c] = false;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      updateCellVisual(r, c);
+});
+
+// ─────────────────────────────────────────
+// FX PANEL TOGGLE
+// ─────────────────────────────────────────
+const fxPanel = document.getElementById('fx-panel');
+document.getElementById('btnFx').addEventListener('click', function() {
+  this.classList.toggle('open');
+  fxPanel.classList.toggle('open');
+});
+
+// ─────────────────────────────────────────
+// DELAY SLIDER
+// ─────────────────────────────────────────
+const delaySlider = document.getElementById('delaySlider');
+const delayVal    = document.getElementById('delayVal');
+delaySlider.addEventListener('input', () => {
+  const v = +delaySlider.value;
+  if (delayWet) delayWet.gain.value = v * 0.7;
+  delayVal.textContent = Math.round(v * 100) + '%';
+});
+
+// ─────────────────────────────────────────
+// FILTER SLIDER
+// ─────────────────────────────────────────
+const filterSlider = document.getElementById('filterSlider');
+const filterVal    = document.getElementById('filterVal');
+filterSlider.addEventListener('input', () => {
+  const v = +filterSlider.value;
+  if (filterNode) filterNode.frequency.value = v;
+  filterVal.textContent = v >= 1000 ? (v/1000).toFixed(1) + 'k' : v + 'Hz';
+});
+
+// ─────────────────────────────────────────
+// KEY / ROOT NOTE BUTTONS
+// ─────────────────────────────────────────
+document.querySelectorAll('.btn-key').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.btn-key').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    rootMidi = 60 + (+btn.dataset.root); // root relative to C4
+    scale = buildScale(rootMidi);
+  });
+});
+
+// ─────────────────────────────────────────
+// AUDIO CONTEXT RESUME ON FIRST INTERACTION
+// ─────────────────────────────────────────
+document.addEventListener('click', () => {
+  if (ctx && ctx.state === 'suspended') ctx.resume();
+}, {once: false});
+
+// ─────────────────────────────────────────
+// SUBTLE AMBIENT BACKGROUND PARTICLES (idle atmosphere)
+// ─────────────────────────────────────────
+setInterval(() => {
+  if (particles.length < 8) {
+    const x = Math.random() * bgCanvas.width;
+    const y = Math.random() * bgCanvas.height;
+    const colors = ['#00f5d422','#ff2d7822','#00aaff22','#a855f722'];
+    particles.push({
+      x, y, vx: (Math.random()-.5)*0.4, vy: -(0.3+Math.random()*0.5),
+      size: 2, maxSize: 40+Math.random()*60,
+      alpha: 0.15, color: colors[Math.floor(Math.random()*4)],
+      type: 3, grow: 0.4, life: 0.9
+    });
+  }
+}, 600);
+
+</script>
+</body>
+</html>
